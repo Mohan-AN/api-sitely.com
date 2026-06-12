@@ -1,0 +1,11 @@
+export const SERVICE_UP = 'Service is up';
+export const VALIDATION_FAILED = 'Validation failed';
+export const INTERNAL_ERROR = 'An unexpected error occurred';
+export const INVALID_CREDENTIALS = 'Invalid credentials';
+export const USER_NOT_FOUND = 'User not found';
+export const INVALID_REFRESH_TOKEN = 'Invalid refresh token';
+export const INVALID_OR_EXPIRED_REFRESH_TOKEN = 'Invalid or expired refresh token';
+export const LOGOUT_SUCCESSFUL = 'Logout successful';
+export const CLIENT_NOT_FOUND = 'Client not found';
+export const WEBSITE_NOT_FOUND = 'Website not found';
+export const UNKNOWN_ERROR = 'Unknown error';

@@ -1,0 +1,37 @@
+{
+  "name": "wbms-api",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "dotenvx run -f .env -- wrangler dev",
+    "build": "tsc --noEmit",
+    "test": "tsc --noEmit",
+    "deploy": "wrangler deploy",
+    "deploy:staging": "wrangler deploy --env staging",
+    "db:generate": "dotenvx run -f .env -- drizzle-kit generate",
+    "db:migrate": "dotenvx run -f .env -- drizzle-kit migrate",
+    "db:migrate:script": "dotenvx run -f .env -- tsx scripts/migrate.ts",
+    "db:studio": "dotenvx run -f .env -- drizzle-kit studio",
+    "seed": "dotenvx run -f .env -- tsx scripts/seed.ts",
+    "seed:script": "dotenvx run -f .env -- tsx scripts/seed.ts"
+  },
+  "dependencies": {
+    "@hono/zod-openapi": "^0.18.4",
+    "@neondatabase/serverless": "^0.10.4",
+    "@scalar/hono-api-reference": "^0.5.161",
+    "bcryptjs": "^2.4.3",
+    "drizzle-orm": "^0.45.2",
+    "hono": "^4.7.11",
+    "jose": "^5.10.0",
+    "pino": "^9.6.0",
+    "zod": "^3.24.4"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20250620.0",
+    "@dotenvx/dotenvx": "^1.49.0",
+    "@types/bcryptjs": "^2.4.6",
+    "drizzle-kit": "^0.31.1",
+    "typescript": "^5.8.3",
+    "wrangler": "^4.19.0"
+  }
+}

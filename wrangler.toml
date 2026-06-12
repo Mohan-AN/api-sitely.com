@@ -1,0 +1,23 @@
+name = "wbms-api"
+main = "src/index.ts"
+compatibility_date = "2024-12-01"
+compatibility_flags = ["nodejs_compat"]
+
+[triggers]
+crons = ["30 2 * * *"]
+
+[vars]
+ENVIRONMENT = "development"
+API_VERSION = "v1.0"
+
+[env.staging]
+name = "wbms-api-staging"
+[env.staging.vars]
+ENVIRONMENT = "staging"
+API_VERSION = "api/v1.0"
+
+[env.production]
+name = "wbms-api-prod"
+[env.production.vars]
+ENVIRONMENT = "production"
+API_VERSION = "api/v1.0"
