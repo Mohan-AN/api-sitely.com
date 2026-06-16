@@ -1,5 +1,4 @@
 import app from './app';
-import { handleDailyExpiry } from './cron/daily-expiry';
 import type { AppBindings } from './types/app.types';
 
 function stripApiVersion(request: Request, version: string) {
@@ -26,8 +25,5 @@ export default {
     }
 
     return app.fetch(versionedRequest, env, ctx);
-  },
-  async scheduled(_event: ScheduledEvent, env: AppBindings['Bindings'], _ctx: ExecutionContext) {
-    await handleDailyExpiry(env);
   },
 };

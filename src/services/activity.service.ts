@@ -5,7 +5,7 @@ import { logger } from '../lib/logger';
 interface LogActivityInput {
   db: Db;
   userId: string | null;
-  action: 'create' | 'update' | 'status_change' | 'type_conversion';
+  action: 'create' | 'update' | 'status_change';
   entityType: 'client' | 'website';
   entityId: string;
   description: string;

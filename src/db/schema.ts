@@ -39,6 +39,24 @@ export const refreshTokens = pgTable(
   ],
 );
 
+export const passwordResetTokens = pgTable(
+  'password_reset_tokens',
+  {
+    tokenId: uuid('token_id').primaryKey().default(sql`gen_random_uuid()`),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.userId),
+    tokenHash: varchar('token_hash', { length: 64 }).notNull(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    usedAt: timestamp('used_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().default(sql`now()`),
+  },
+  (t) => [
+    uniqueIndex('password_reset_tokens_token_hash_idx').on(t.tokenHash),
+    index('password_reset_tokens_user_idx').on(t.userId),
+  ],
+);
+
 export const clients = pgTable('clients', {
   clientId: varchar('client_id', { length: 10 }).primaryKey(),
   name: varchar('name', { length: 100 }).notNull(),
@@ -62,7 +80,6 @@ export const websites = pgTable(
     url: varchar('url', { length: 255 }),
     siteType: varchar('site_type', { length: 20 }).notNull(),
     platform: varchar('platform', { length: 20 }).notNull(),
-    serviceType: varchar('service_type', { length: 20 }).notNull(),
     websiteStatus: varchar('website_status', { length: 30 }).notNull().default('In Progress'),
     maintenanceStatus: varchar('maintenance_status', { length: 20 }).notNull().default('Not Started'),
     startDate: date('start_date'),
@@ -70,9 +87,6 @@ export const websites = pgTable(
     lastInvoiceSent: date('last_invoice_sent'),
     lastPaymentReceived: date('last_payment_received'),
     renewalDate: date('renewal_date'),
-    handoverDate: date('handover_date'),
-    transferCompleted: boolean('transfer_completed').notNull().default(false),
-    serviceTypeChangedAt: date('service_type_changed_at'),
     remarks: text('remarks'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().default(sql`now()`),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().default(sql`now()`),

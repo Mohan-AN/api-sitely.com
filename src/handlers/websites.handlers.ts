@@ -1,5 +1,12 @@
 import { getDb } from '../db/client';
-import { listWebsites, createWebsite, getWebsite, updateWebsite } from '../services/websites.service';
+import {
+  listWebsites,
+  createWebsite,
+  getWebsite,
+  updateWebsite,
+  getWebsiteActivity,
+  getWebsiteStats,
+} from '../services/websites.service';
 import { successResponse } from '../types/common.types';
 import { UNKNOWN_ERROR, WEBSITE_NOT_FOUND } from '../constants/app-messages';
 import { ConflictException, NotFoundException } from '../exceptions/http-exceptions';
@@ -8,6 +15,12 @@ export async function listWebsitesHandler(c: any) {
   const q = c.req.valid('query');
   const db = getDb(c.env.DB_URL);
   const result = await listWebsites(db, q);
+  return c.json(successResponse(result));
+}
+
+export async function getWebsiteStatsHandler(c: any) {
+  const db = getDb(c.env.DB_URL);
+  const result = await getWebsiteStats(db);
   return c.json(successResponse(result));
 }
 
@@ -24,6 +37,16 @@ export async function getWebsiteHandler(c: any) {
   const website = await getWebsite(db, c.req.param('id'));
   if (!website) throw new NotFoundException(WEBSITE_NOT_FOUND);
   return c.json(successResponse(website));
+}
+
+export async function getWebsiteActivityHandler(c: any) {
+  const q = c.req.valid('query');
+  const db = getDb(c.env.DB_URL);
+  const website = await getWebsite(db, c.req.param('id'));
+  if (!website) throw new NotFoundException(WEBSITE_NOT_FOUND);
+
+  const result = await getWebsiteActivity(db, c.req.param('id'), q.page, q.limit);
+  return c.json(successResponse(result));
 }
 
 export async function updateWebsiteHandler(c: any) {

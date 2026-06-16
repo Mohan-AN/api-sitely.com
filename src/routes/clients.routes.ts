@@ -30,7 +30,6 @@ const zClientDetail = zClient.extend({
     url: z.string().nullable(),
     websiteStatus: z.string(),
     maintenanceStatus: z.string(),
-    serviceType: z.string(),
   })),
 });
 

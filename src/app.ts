@@ -5,7 +5,6 @@ import { errorMiddleware } from './middleware/error.middleware';
 import authRouter from './routes/auth.routes';
 import clientsRouter from './routes/clients.routes';
 import websitesRouter from './routes/websites.routes';
-import dashboardRouter from './routes/dashboard.routes';
 import settingsRouter from './routes/settings.routes';
 
 const app = createApp();
@@ -32,7 +31,6 @@ app.get('/health', (c) => c.json({ status: 'ok', env: c.env.ENVIRONMENT }));
 app.route('/auth', authRouter);
 app.route('/clients', clientsRouter);
 app.route('/websites', websitesRouter);
-app.route('/dashboard', dashboardRouter);
 app.route('/settings', settingsRouter);
 
 app.doc('/json', (c) => {
@@ -41,9 +39,9 @@ app.doc('/json', (c) => {
   return {
     openapi: '3.1.0',
     info: {
-      title: 'WBMS API',
+      title: 'Sitely API',
       version: '1.0.0',
-      description: 'Website Business Management System - Phase 1',
+      description: 'Sitely - Phase 1',
     },
     servers: [
       { url: `http://localhost:8787/${version}`, description: 'Local' },

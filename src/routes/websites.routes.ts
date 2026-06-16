@@ -5,7 +5,9 @@ import { createWebsiteSchema, updateWebsiteSchema, websiteListQuerySchema } from
 import { bearerAuth, commonErrorResponses, zPaginatedResponse, zSuccessResponse } from '../lib/openapi-schemas';
 import {
   createWebsiteHandler,
+  getWebsiteActivityHandler,
   getWebsiteHandler,
+  getWebsiteStatsHandler,
   listWebsitesHandler,
   updateWebsiteHandler,
 } from '../handlers/websites.handlers';
@@ -19,7 +21,6 @@ const zWebsite = z.object({
   url: z.string().nullable(),
   siteType: z.string(),
   platform: z.string(),
-  serviceType: z.string(),
   websiteStatus: z.string(),
   maintenanceStatus: z.string(),
   startDate: z.string().nullable(),
@@ -27,13 +28,41 @@ const zWebsite = z.object({
   lastInvoiceSent: z.string().nullable(),
   lastPaymentReceived: z.string().nullable(),
   renewalDate: z.string().nullable(),
-  handoverDate: z.string().nullable(),
-  transferCompleted: z.boolean(),
-  serviceTypeChangedAt: z.string().nullable().optional(),
   remarks: z.string().nullable(),
   createdAt: z.string(),
   updatedAt: z.string(),
+  clientName: z.string().optional(),
+  isOverdue: z.boolean().optional(),
 });
+
+(websitesRouter as any).openapi(
+  createRoute({
+    method: 'get',
+    path: '/stats',
+    tags: ['Websites'],
+    summary: 'Website stats',
+    middleware: [authMiddleware] as const,
+    security: [bearerAuth],
+    responses: {
+      200: {
+        description: 'Website stats',
+        content: {
+          'application/json': {
+            schema: zSuccessResponse(z.object({
+              websites: z.number(),
+              clients: z.number(),
+              live: z.number(),
+              expired: z.number(),
+              dueSoon: z.number(),
+            })),
+          },
+        },
+      },
+      401: commonErrorResponses[401],
+    },
+  }),
+  getWebsiteStatsHandler,
+);
 
 (websitesRouter as any).openapi(
   createRoute({
@@ -72,6 +101,12 @@ const zWebsite = z.object({
   createWebsiteHandler,
 );
 
+const zWebsiteDetail = zWebsite.extend({
+  clientName: z.string(),
+  isOverdue: z.boolean(),
+  allowedActions: z.array(z.string()),
+});
+
 (websitesRouter as any).openapi(
   createRoute({
     method: 'get',
@@ -82,12 +117,52 @@ const zWebsite = z.object({
     security: [bearerAuth],
     request: { params: z.object({ id: z.string() }) },
     responses: {
-      200: { description: 'Website detail', content: { 'application/json': { schema: zSuccessResponse(zWebsite) } } },
+      200: { description: 'Website detail', content: { 'application/json': { schema: zSuccessResponse(zWebsiteDetail) } } },
       401: commonErrorResponses[401],
       404: commonErrorResponses[404],
     },
   }),
   getWebsiteHandler,
+);
+
+(websitesRouter as any).openapi(
+  createRoute({
+    method: 'get',
+    path: '/:id/activity',
+    tags: ['Websites'],
+    summary: 'Get website activity',
+    middleware: [authMiddleware] as const,
+    security: [bearerAuth],
+    request: {
+      params: z.object({ id: z.string() }),
+      query: z.object({
+        page: z.coerce.number().int().positive().default(1),
+        limit: z.coerce.number().int().positive().max(100).default(20),
+      }),
+    },
+    responses: {
+      200: {
+        description: 'Website activity',
+        content: {
+          'application/json': {
+            schema: zPaginatedResponse(z.object({
+              logId: z.string(),
+              action: z.string(),
+              description: z.string(),
+              oldValue: z.unknown().nullable(),
+              newValue: z.unknown().nullable(),
+              createdAt: z.string(),
+              userName: z.string(),
+            })),
+          },
+        },
+      },
+      401: commonErrorResponses[401],
+      404: commonErrorResponses[404],
+      422: commonErrorResponses[422],
+    },
+  }),
+  getWebsiteActivityHandler,
 );
 
 (websitesRouter as any).openapi(

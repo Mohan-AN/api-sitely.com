@@ -7,9 +7,9 @@ export function createOpenAPIApp() {
 export const openAPIConfig = {
   openapi: '3.1.0',
   info: {
-    title: 'WBMS API',
+    title: 'Sitely API',
     version: '1.0.0',
-    description: 'Website Business Management System — Phase 1',
+    description: 'Sitely - Phase 1',
   },
   servers: [
     { url: 'http://localhost:8787', description: 'Local' },

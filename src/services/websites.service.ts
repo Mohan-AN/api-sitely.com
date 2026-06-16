@@ -1,36 +1,73 @@
-import { eq, ilike, and, count, sql } from 'drizzle-orm';
+import { eq, ilike, and, count, sql, or, lt, lte, gte, desc } from 'drizzle-orm';
 import { Db } from '../db/client';
-import { websites, clients } from '../db/schema';
+import { websites, clients, activityLog, users, settings } from '../db/schema';
 import { generateWebsiteId } from '../utils/id-generator';
 import { logActivity } from './activity.service';
-import { validateStatusTransition, isOverdue } from '../utils/status-rules';
-import type { WebsiteWithMeta } from '../types/website.types';
+import { runExpiryCheckOncePerDay } from './expiry.service';
+import { validateStatusTransition, isOverdue, getAllowedActions } from '../utils/status-rules';
+import type { WebsiteActivity, WebsiteDetail, WebsiteStats, WebsiteWithMeta } from '../types/website.types';
 import type { PaginatedData } from '../types/common.types';
 
 type WebsiteListQuery = {
   clientId?: string;
   websiteStatus?: string;
   maintenanceStatus?: string;
-  serviceType?: string;
   siteType?: string;
   platform?: string;
-  transferPending?: boolean;
+  overdueOnly?: boolean;
+  sortBy?: string;
+  sortOrder: 'asc' | 'desc';
   search?: string;
   page: number;
   limit: number;
 };
 
+const sortableColumns = {
+  websiteId: websites.websiteId,
+  projectName: websites.projectName,
+  clientName: clients.name,
+  url: websites.url,
+  siteType: websites.siteType,
+  platform: websites.platform,
+  websiteStatus: websites.websiteStatus,
+  maintenanceStatus: websites.maintenanceStatus,
+  renewalDate: websites.renewalDate,
+  createdAt: websites.createdAt,
+  updatedAt: websites.updatedAt,
+} as const;
+
+function overdueCondition(today: string) {
+  return and(
+    lt(websites.renewalDate, today),
+    or(
+      sql`${websites.lastPaymentReceived} is null`,
+      lt(websites.lastPaymentReceived, websites.renewalDate),
+    ),
+  );
+}
+
+function listOrderBy(q: WebsiteListQuery) {
+  if (!q.sortBy) return sql`${websites.renewalDate} asc nulls last`;
+
+  const column = sortableColumns[q.sortBy as keyof typeof sortableColumns];
+  if (!column) return sql`${websites.renewalDate} asc nulls last`;
+
+  return q.sortOrder === 'desc' ? sql`${column} desc nulls last` : sql`${column} asc nulls last`;
+}
+
 export async function listWebsites(db: Db, q: WebsiteListQuery): Promise<PaginatedData<WebsiteWithMeta>> {
+  await runExpiryCheckOncePerDay(db);
+
   const offset = (q.page - 1) * q.limit;
+  const today = new Date().toISOString().split('T')[0]!;
 
   const conditions = [];
   if (q.clientId) conditions.push(eq(websites.clientId, q.clientId));
   if (q.websiteStatus) conditions.push(eq(websites.websiteStatus, q.websiteStatus));
   if (q.maintenanceStatus) conditions.push(eq(websites.maintenanceStatus, q.maintenanceStatus));
-  if (q.serviceType) conditions.push(eq(websites.serviceType, q.serviceType));
   if (q.siteType) conditions.push(eq(websites.siteType, q.siteType));
   if (q.platform) conditions.push(eq(websites.platform, q.platform));
-  if (q.transferPending === true) conditions.push(eq(websites.transferCompleted, false));
+  if (q.overdueOnly === true) conditions.push(overdueCondition(today));
   if (q.search) conditions.push(ilike(websites.projectName, `%${q.search}%`));
 
   const where = conditions.length > 0 ? and(...conditions) : undefined;
@@ -44,7 +81,6 @@ export async function listWebsites(db: Db, q: WebsiteListQuery): Promise<Paginat
         url: websites.url,
         siteType: websites.siteType,
         platform: websites.platform,
-        serviceType: websites.serviceType,
         websiteStatus: websites.websiteStatus,
         maintenanceStatus: websites.maintenanceStatus,
         startDate: websites.startDate,
@@ -52,9 +88,6 @@ export async function listWebsites(db: Db, q: WebsiteListQuery): Promise<Paginat
         lastInvoiceSent: websites.lastInvoiceSent,
         lastPaymentReceived: websites.lastPaymentReceived,
         renewalDate: websites.renewalDate,
-        handoverDate: websites.handoverDate,
-        transferCompleted: websites.transferCompleted,
-        serviceTypeChangedAt: websites.serviceTypeChangedAt,
         remarks: websites.remarks,
         createdAt: websites.createdAt,
         updatedAt: websites.updatedAt,
@@ -63,7 +96,7 @@ export async function listWebsites(db: Db, q: WebsiteListQuery): Promise<Paginat
       .from(websites)
       .innerJoin(clients, eq(clients.clientId, websites.clientId))
       .where(where)
-      .orderBy(websites.createdAt)
+      .orderBy(listOrderBy(q))
       .limit(q.limit)
       .offset(offset),
     db.select({ total: count() }).from(websites).where(where),
@@ -79,13 +112,54 @@ export async function listWebsites(db: Db, q: WebsiteListQuery): Promise<Paginat
       lastInvoiceSent: r.lastInvoiceSent ?? null,
       lastPaymentReceived: r.lastPaymentReceived ?? null,
       renewalDate: r.renewalDate ?? null,
-      handoverDate: r.handoverDate ?? null,
-      serviceTypeChangedAt: r.serviceTypeChangedAt ?? null,
       createdAt: r.createdAt.toISOString(),
       updatedAt: r.updatedAt.toISOString(),
-      isOverdue: isOverdue(r.serviceType, r.renewalDate ?? null, r.lastPaymentReceived ?? null),
+      isOverdue: isOverdue(r.renewalDate ?? null, r.lastPaymentReceived ?? null),
     })),
     pagination: { page: q.page, limit: q.limit, total, totalPages: Math.ceil(total / q.limit) },
+  };
+}
+
+export async function getWebsiteStats(db: Db): Promise<WebsiteStats> {
+  await runExpiryCheckOncePerDay(db);
+
+  const today = new Date().toISOString().split('T')[0]!;
+
+  const windowRow = await db.select().from(settings).where(eq(settings.key, 'renewal_window_days'));
+  const windowDays = parseInt(windowRow[0]?.value ?? '30', 10);
+  const windowDate = new Date();
+  windowDate.setDate(windowDate.getDate() + windowDays);
+  const windowDateStr = windowDate.toISOString().split('T')[0]!;
+
+  const [
+    websiteCount,
+    clientCount,
+    liveCount,
+    expiredCount,
+    dueSoonCount,
+  ] = await Promise.all([
+    db.select({ total: count() }).from(websites),
+    db.select({ total: count() }).from(clients),
+    db.select({ total: count() }).from(websites).where(eq(websites.websiteStatus, 'Live')),
+    db.select({ total: count() }).from(websites).where(eq(websites.maintenanceStatus, 'Expired')),
+    db
+      .select({ total: count() })
+      .from(websites)
+      .where(
+        and(
+          eq(websites.maintenanceStatus, 'Active'),
+          gte(websites.renewalDate, today),
+          lte(websites.renewalDate, windowDateStr),
+        ),
+      ),
+  ]);
+
+  return {
+    websites: websiteCount[0]?.total ?? 0,
+    clients: clientCount[0]?.total ?? 0,
+    live: liveCount[0]?.total ?? 0,
+    expired: expiredCount[0]?.total ?? 0,
+    dueSoon: dueSoonCount[0]?.total ?? 0,
   };
 }
 
@@ -98,13 +172,11 @@ export async function createWebsite(
     url?: string | null;
     siteType: string;
     platform: string;
-    serviceType: string;
     startDate?: string | null;
     hostedDate?: string | null;
     lastInvoiceSent?: string | null;
     lastPaymentReceived?: string | null;
     renewalDate?: string | null;
-    handoverDate?: string | null;
     remarks?: string | null;
   },
 ) {
@@ -122,13 +194,11 @@ export async function createWebsite(
       url: input.url ?? null,
       siteType: input.siteType,
       platform: input.platform,
-      serviceType: input.serviceType,
       startDate: input.startDate ?? null,
       hostedDate: input.hostedDate ?? null,
       lastInvoiceSent: input.lastInvoiceSent ?? null,
       lastPaymentReceived: input.lastPaymentReceived ?? null,
       renewalDate: input.renewalDate ?? null,
-      handoverDate: input.handoverDate ?? null,
       remarks: input.remarks ?? null,
     })
     .returning();
@@ -147,7 +217,7 @@ export async function createWebsite(
   return { data: { ...row, createdAt: row.createdAt.toISOString(), updatedAt: row.updatedAt.toISOString() } };
 }
 
-export async function getWebsite(db: Db, websiteId: string): Promise<WebsiteWithMeta | null> {
+export async function getWebsite(db: Db, websiteId: string): Promise<WebsiteDetail | null> {
   const rows = await db
     .select({
       websiteId: websites.websiteId,
@@ -156,7 +226,6 @@ export async function getWebsite(db: Db, websiteId: string): Promise<WebsiteWith
       url: websites.url,
       siteType: websites.siteType,
       platform: websites.platform,
-      serviceType: websites.serviceType,
       websiteStatus: websites.websiteStatus,
       maintenanceStatus: websites.maintenanceStatus,
       startDate: websites.startDate,
@@ -164,9 +233,6 @@ export async function getWebsite(db: Db, websiteId: string): Promise<WebsiteWith
       lastInvoiceSent: websites.lastInvoiceSent,
       lastPaymentReceived: websites.lastPaymentReceived,
       renewalDate: websites.renewalDate,
-      handoverDate: websites.handoverDate,
-      transferCompleted: websites.transferCompleted,
-      serviceTypeChangedAt: websites.serviceTypeChangedAt,
       remarks: websites.remarks,
       createdAt: websites.createdAt,
       updatedAt: websites.updatedAt,
@@ -179,18 +245,62 @@ export async function getWebsite(db: Db, websiteId: string): Promise<WebsiteWith
   const r = rows[0];
   if (!r) return null;
 
-  return {
+  const detail = {
     ...r,
     startDate: r.startDate ?? null,
     hostedDate: r.hostedDate ?? null,
     lastInvoiceSent: r.lastInvoiceSent ?? null,
     lastPaymentReceived: r.lastPaymentReceived ?? null,
     renewalDate: r.renewalDate ?? null,
-    handoverDate: r.handoverDate ?? null,
-    serviceTypeChangedAt: r.serviceTypeChangedAt ?? null,
     createdAt: r.createdAt.toISOString(),
     updatedAt: r.updatedAt.toISOString(),
-    isOverdue: isOverdue(r.serviceType, r.renewalDate ?? null, r.lastPaymentReceived ?? null),
+    isOverdue: isOverdue(r.renewalDate ?? null, r.lastPaymentReceived ?? null),
+  };
+
+  return {
+    ...detail,
+    allowedActions: getAllowedActions(detail),
+  };
+}
+
+export async function getWebsiteActivity(
+  db: Db,
+  websiteId: string,
+  page: number,
+  limit: number,
+): Promise<PaginatedData<WebsiteActivity>> {
+  const offset = (page - 1) * limit;
+  const where = and(eq(activityLog.entityType, 'website'), eq(activityLog.entityId, websiteId));
+
+  const [rows, countResult] = await Promise.all([
+    db
+      .select({
+        logId: activityLog.logId,
+        action: activityLog.action,
+        description: activityLog.description,
+        oldValue: activityLog.oldValue,
+        newValue: activityLog.newValue,
+        createdAt: activityLog.createdAt,
+        userName: users.name,
+      })
+      .from(activityLog)
+      .leftJoin(users, eq(users.userId, activityLog.userId))
+      .where(where)
+      .orderBy(desc(activityLog.createdAt))
+      .limit(limit)
+      .offset(offset),
+    db.select({ total: count() }).from(activityLog).where(where),
+  ]);
+
+  const total = countResult[0]?.total ?? 0;
+
+  return {
+    items: rows.map((r) => ({
+      ...r,
+      userName: r.userName ?? 'System',
+      createdAt: r.createdAt.toISOString(),
+    })),
+    pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
   };
 }
 
@@ -204,7 +314,6 @@ export async function updateWebsite(
     url?: string | null;
     siteType?: string;
     platform?: string;
-    serviceType?: string;
     websiteStatus?: string;
     maintenanceStatus?: string;
     startDate?: string | null;
@@ -212,16 +321,14 @@ export async function updateWebsite(
     lastInvoiceSent?: string | null;
     lastPaymentReceived?: string | null;
     renewalDate?: string | null;
-    handoverDate?: string | null;
-    transferCompleted?: boolean;
     remarks?: string | null;
   },
 ) {
   const existing = await getWebsite(db, websiteId);
   if (!existing) return { error: 'Website not found' };
 
-  const effectiveServiceType = input.serviceType ?? existing.serviceType;
-  const today = new Date().toISOString().split('T')[0]!;
+  const validationMaintenanceStatus =
+    input.websiteStatus === 'Discontinued' ? 'Cancelled' : input.maintenanceStatus;
 
   // Validate status transitions
   if (input.websiteStatus || input.maintenanceStatus) {
@@ -229,12 +336,10 @@ export async function updateWebsite(
       currentWebsiteStatus: existing.websiteStatus,
       currentMaintenanceStatus: existing.maintenanceStatus,
       newWebsiteStatus: input.websiteStatus,
-      newMaintenanceStatus: input.maintenanceStatus,
+      newMaintenanceStatus: validationMaintenanceStatus,
       url: input.url ?? existing.url,
       hostedDate: input.hostedDate ?? existing.hostedDate,
       renewalDate: input.renewalDate ?? existing.renewalDate,
-      handoverDate: input.handoverDate ?? existing.handoverDate,
-      serviceType: effectiveServiceType,
     });
     if (!validation.ok) return { error: validation.error };
   }
@@ -243,26 +348,14 @@ export async function updateWebsite(
   const forcedMaintStatus =
     input.websiteStatus === 'Discontinued' ? 'Cancelled' : input.maintenanceStatus;
 
-  // Type conversion: TO handover forces maintenance Cancelled; stamp changed_at
-  let serviceTypeChangedAt = existing.serviceTypeChangedAt;
-  if (input.serviceType && input.serviceType !== existing.serviceType) {
-    if (existing.websiteStatus === 'Discontinued') {
-      return { error: 'Cannot convert service type on a Discontinued website' };
-    }
-    if (input.serviceType === 'maintain' && !input.renewalDate && !existing.renewalDate) {
-      return { error: 'Renewal date is required when converting to maintain' };
-    }
-    serviceTypeChangedAt = today;
-  }
-
   const updates: Record<string, unknown> = {
     updatedAt: new Date(),
   };
 
   const fields = [
-    'clientId', 'projectName', 'url', 'siteType', 'platform', 'serviceType',
+    'clientId', 'projectName', 'url', 'siteType', 'platform',
     'startDate', 'hostedDate', 'lastInvoiceSent', 'lastPaymentReceived',
-    'renewalDate', 'handoverDate', 'transferCompleted', 'remarks',
+    'renewalDate', 'remarks',
   ] as const;
 
   for (const f of fields) {
@@ -271,10 +364,6 @@ export async function updateWebsite(
 
   if (input.websiteStatus) updates['websiteStatus'] = input.websiteStatus;
   if (forcedMaintStatus) updates['maintenanceStatus'] = forcedMaintStatus;
-  if (serviceTypeChangedAt !== existing.serviceTypeChangedAt) {
-    updates['serviceTypeChangedAt'] = serviceTypeChangedAt;
-    if (input.serviceType === 'handover') updates['maintenanceStatus'] = 'Cancelled';
-  }
 
   const [updated] = await db
     .update(websites)
@@ -305,19 +394,6 @@ export async function updateWebsite(
     }));
   }
 
-  if (input.serviceType && input.serviceType !== existing.serviceType) {
-    logs.push(logActivity({
-      db, userId, action: 'type_conversion', entityType: 'website', entityId: websiteId,
-      description: `${websiteId} converted ${existing.serviceType} → ${input.serviceType}`,
-    }));
-  }
-
-  if (input.transferCompleted === true && !existing.transferCompleted) {
-    logs.push(logActivity({
-      db, userId, action: 'update', entityType: 'website', entityId: websiteId,
-      description: `${websiteId} transfer to client completed`,
-    }));
-  }
 
   if (logs.length === 0) {
     const changedFields = Object.keys(input).join(', ');
@@ -339,8 +415,6 @@ export async function updateWebsite(
       lastInvoiceSent: updated.lastInvoiceSent ?? null,
       lastPaymentReceived: updated.lastPaymentReceived ?? null,
       renewalDate: updated.renewalDate ?? null,
-      handoverDate: updated.handoverDate ?? null,
-      serviceTypeChangedAt: updated.serviceTypeChangedAt ?? null,
       createdAt: updated.createdAt.toISOString(),
       updatedAt: updated.updatedAt.toISOString(),
     },

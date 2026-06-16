@@ -1,6 +1,10 @@
-node_modules/
+﻿node_modules/
 dist/
-.dev.vars
-*.log
 .wrangler/
-.env*
+.dev.vars*
+.env
+.env.*
+!.env.example
+
+app-sitely.com/
+sitely-implementation-plan.md

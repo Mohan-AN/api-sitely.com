@@ -99,7 +99,6 @@ export async function getClient(db: Db, clientId: string): Promise<ClientDetail 
       url: websites.url,
       websiteStatus: websites.websiteStatus,
       maintenanceStatus: websites.maintenanceStatus,
-      serviceType: websites.serviceType,
     })
     .from(websites)
     .where(eq(websites.clientId, clientId));

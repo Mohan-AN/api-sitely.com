@@ -1,10 +1,7 @@
-name = "wbms-api"
+name = "sitely-api"
 main = "src/index.ts"
 compatibility_date = "2024-12-01"
 compatibility_flags = ["nodejs_compat"]
-
-[triggers]
-crons = ["30 2 * * *"]
 
 [vars]
 ENVIRONMENT = "development"

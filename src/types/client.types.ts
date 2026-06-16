@@ -24,5 +24,4 @@ export interface ClientWebsiteSummary {
   url: string | null;
   websiteStatus: string;
   maintenanceStatus: string;
-  serviceType: string;
 }

@@ -1,6 +1,6 @@
 import { and, eq, lt, isNull, or } from 'drizzle-orm';
 import { Db } from '../db/client';
-import { websites } from '../db/schema';
+import { settings, websites } from '../db/schema';
 import { logActivity } from './activity.service';
 import { logger } from '../lib/logger';
 
@@ -43,4 +43,25 @@ export async function runDailyExpiryCheck(db: Db): Promise<number> {
 
   logger.info({ count: due.length }, 'Daily expiry check complete');
   return due.length;
+}
+
+export async function runExpiryCheckOncePerDay(db: Db): Promise<void> {
+  const today = new Date().toISOString().split('T')[0]!;
+
+  const [marker] = await db
+    .select()
+    .from(settings)
+    .where(eq(settings.key, 'last_expiry_run'));
+
+  if (marker?.value === today) return;
+
+  await runDailyExpiryCheck(db);
+
+  await db
+    .insert(settings)
+    .values({ key: 'last_expiry_run', value: today })
+    .onConflictDoUpdate({
+      target: settings.key,
+      set: { value: today },
+    });
 }

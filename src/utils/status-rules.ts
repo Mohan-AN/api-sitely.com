@@ -46,8 +46,6 @@ export interface StatusUpdateInput {
   url?: string | null;
   hostedDate?: string | null;
   renewalDate?: string | null;
-  handoverDate?: string | null;
-  serviceType: string;
 }
 
 export interface StatusValidationResult {
@@ -93,14 +91,8 @@ export function validateStatusTransition(input: StatusUpdateInput): StatusValida
     if (!input.hostedDate) {
       return { ok: false, error: 'Hosted date is required to mark a website as Live' };
     }
-    if (input.serviceType === 'maintain' && !input.renewalDate) {
-      return { ok: false, error: 'Renewal date is required for maintain websites going Live' };
-    }
-  }
-
-  if (targetWebsite === 'Completed' && input.serviceType === 'handover') {
-    if (!input.handoverDate) {
-      return { ok: false, error: 'Handover date is required to mark a handover website as Completed' };
+    if (!input.renewalDate) {
+      return { ok: false, error: 'Renewal date is required to mark a website as Live' };
     }
   }
 
@@ -114,13 +106,74 @@ export function validateStatusTransition(input: StatusUpdateInput): StatusValida
 }
 
 export function isOverdue(
-  serviceType: string,
   renewalDate: string | null,
   lastPaymentReceived: string | null,
 ): boolean {
-  if (serviceType !== 'maintain' || !renewalDate) return false;
+  if (!renewalDate) return false;
   const today = new Date().toISOString().split('T')[0]!;
   if (renewalDate >= today) return false;
   if (!lastPaymentReceived) return true;
   return lastPaymentReceived < renewalDate;
+}
+
+export type WebsiteAction =
+  | 'mark-live'
+  | 'record-payment'
+  | 'put-on-hold'
+  | 'discontinue';
+
+export interface WebsiteActionInput {
+  websiteStatus: string;
+  maintenanceStatus: string;
+  url: string | null;
+  hostedDate: string | null;
+  renewalDate: string | null;
+}
+
+export function getAllowedActions(website: WebsiteActionInput): WebsiteAction[] {
+  const actions: WebsiteAction[] = [];
+
+  const canMarkLive = validateStatusTransition({
+    currentWebsiteStatus: website.websiteStatus,
+    currentMaintenanceStatus: website.maintenanceStatus,
+    newWebsiteStatus: 'Live',
+    url: website.url,
+    hostedDate: website.hostedDate,
+    renewalDate: website.renewalDate,
+  }).ok;
+
+  if (canMarkLive) actions.push('mark-live');
+
+  if (
+    website.websiteStatus !== 'Discontinued' &&
+    website.maintenanceStatus === 'Expired'
+  ) {
+    actions.push('record-payment');
+  }
+
+  const canPutOnHold = validateStatusTransition({
+    currentWebsiteStatus: website.websiteStatus,
+    currentMaintenanceStatus: website.maintenanceStatus,
+    newWebsiteStatus: 'On Hold',
+    newMaintenanceStatus: website.maintenanceStatus === 'Active' ? 'Paused' : website.maintenanceStatus,
+    url: website.url,
+    hostedDate: website.hostedDate,
+    renewalDate: website.renewalDate,
+  }).ok;
+
+  if (canPutOnHold) actions.push('put-on-hold');
+
+  const canDiscontinue = validateStatusTransition({
+    currentWebsiteStatus: website.websiteStatus,
+    currentMaintenanceStatus: website.maintenanceStatus,
+    newWebsiteStatus: 'Discontinued',
+    newMaintenanceStatus: 'Cancelled',
+    url: website.url,
+    hostedDate: website.hostedDate,
+    renewalDate: website.renewalDate,
+  }).ok;
+
+  if (canDiscontinue) actions.push('discontinue');
+
+  return actions;
 }
